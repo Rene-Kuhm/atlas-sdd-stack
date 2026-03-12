@@ -1,0 +1,49 @@
+# openspec/changes/<change-name>/state.yaml
+# DAG state — permite recuperar el pipeline si se pierde el contexto
+
+change: "<change-name>"
+artifact_store: "openspec"        # openspec | sqlite | hybrid
+status: "exploring"               # exploring | proposing | speccing | designing | planning | implementing | verifying | archiving | done
+
+# Fase actual
+phase: "explore"                  # explore | propose | spec | design | tasks | apply | verify | archive
+
+# Timestamps
+started: "YYYY-MM-DD"
+last_updated: "YYYY-MM-DD"
+
+# Fases completadas
+phases_completed: []
+
+# Fases pendientes
+phases_pending:
+  - explore
+  - propose
+  - spec
+  - design
+  - tasks
+  - apply
+  - verify
+  - archive
+
+# Gates de aprobación
+gates:
+  proposal_approved: false        # true cuando usuario aprueba proposal.md
+  archive_approved: false         # true cuando verify = APPROVED
+
+# Artifacts generados (actualizar al completar cada fase)
+artifacts:
+  exploration: ""                 # path cuando existe
+  proposal: ""
+  specs: []                       # lista de paths
+  design: ""
+  tasks: ""
+  apply_progress: ""
+  verify_report: ""
+  archive_report: ""
+
+# Worktree asignado
+worktree: "feat/<change-name>"
+
+# Sub-agentes involucrados (audit trail)
+agents_used: []

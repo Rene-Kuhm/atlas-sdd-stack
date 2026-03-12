@@ -1,0 +1,294 @@
+openapi: "3.1.0"
+
+info:
+  title: "[Nombre del servicio] API"
+  version: "1.0.0"
+  description: |
+    [Descripción del servicio. Qué problema resuelve.]
+  contact:
+    name: "[Equipo responsable]"
+
+servers:
+  - url: "https://api.ejemplo.com/v1"
+    description: "Producción"
+  - url: "https://api-staging.ejemplo.com/v1"
+    description: "Staging"
+
+# ──────────────────────────────────────────────────────────────────
+# INSTRUCCIÓN: Este archivo se crea ANTES del código.
+# El código implementa este contrato. No al revés.
+# Cambios breaking = nueva versión (v2). Siempre.
+# ──────────────────────────────────────────────────────────────────
+
+tags:
+  - name: "[recurso]"
+    description: "[descripción del grupo de endpoints]"
+
+paths:
+  /[recurso]:
+    get:
+      tags: ["[recurso]"]
+      summary: "Listar [recursos]"
+      operationId: "list[Recurso]"
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: "Lista de [recursos]"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags: ["[recurso]"]
+      summary: "Crear [recurso]"
+      operationId: "create[Recurso]"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Create[Recurso]Request"
+      responses:
+        "201":
+          description: "[Recurso] creado"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/[Recurso]"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /[recurso]/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: ["[recurso]"]
+      summary: "Obtener [recurso] por ID"
+      operationId: "get[Recurso]"
+      responses:
+        "200":
+          description: "[Recurso] encontrado"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/[Recurso]"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      tags: ["[recurso]"]
+      summary: "Actualizar [recurso]"
+      operationId: "update[Recurso]"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Update[Recurso]Request"
+      responses:
+        "200":
+          description: "[Recurso] actualizado"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/[Recurso]"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags: ["[recurso]"]
+      summary: "Eliminar [recurso]"
+      operationId: "delete[Recurso]"
+      responses:
+        "204":
+          description: "Eliminado exitosamente"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+# ──────────────────────────────────────────────────────────────────
+# SCHEMAS — Definir todos los modelos aquí
+# ──────────────────────────────────────────────────────────────────
+components:
+  schemas:
+    # Modelo principal del recurso
+    "[Recurso]":
+      type: object
+      required: [id, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        # [añadir campos del dominio aquí]
+
+    # Request para crear
+    "Create[Recurso]Request":
+      type: object
+      required: []  # [campos obligatorios]
+      properties: {}  # [definir campos]
+
+    # Request para actualizar (todos opcionales — PATCH semántico)
+    "Update[Recurso]Request":
+      type: object
+      properties: {}  # [definir campos actualizables]
+
+    # Paginación estándar
+    PaginatedResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {}
+        pagination:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer
+
+    # Error estándar — NO modificar esta estructura
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message, trace_id, timestamp]
+          properties:
+            type:
+              type: string
+              enum:
+                - ValidationError
+                - AuthError
+                - ForbiddenError
+                - NotFoundError
+                - ConflictError
+                - RateLimitError
+                - InternalError
+                - ExternalSvcError
+            code:
+              type: string
+              description: "Código de error específico en SCREAMING_SNAKE_CASE"
+            message:
+              type: string
+              description: "Mensaje legible para el cliente"
+            trace_id:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+
+  # Respuestas de error reutilizables
+  responses:
+    ValidationError:
+      description: "Datos de entrada inválidos"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: "No autenticado"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: "Sin permisos"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: "Recurso no encontrado"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: "Conflicto de estado (ej: recurso ya existe)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalError:
+      description: "Error interno del servidor"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  # Seguridad
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []

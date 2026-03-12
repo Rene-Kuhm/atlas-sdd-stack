@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# pre-commit — GGA v2 con IA multi-provider, cache inteligente y timeout
+#
+# Capas de validación:
+#   Layer 1: Secrets hardcodeados (regex, sin IA, inmediato)
+#   Layer 2: Linters estáticos (ruff, tsc — sin IA)
+#   Layer 3: AI code review con cache SHA256 (solo archivos cambiados)
+#
+# Instalar en un proyecto:
+#   bash /c/Users/insyd/enterprise-ai-stack/scripts/gga-init.sh --install-hook
+# O manualmente:
+#   cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -euo pipefail
+
+export PATH="/c/Program Files/nodejs:/c/Users/insyd/AppData/Local/Microsoft/WinGet/Packages/SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe:/c/Users/insyd/AppData/Local/Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe:$PATH"
+
+# ──────────────────────────────────────────────────────────────────
+# Configuración: leer .gga si existe, sino usar defaults
+# ──────────────────────────────────────────────────────────────────
+PROVIDER="claude"
+MODEL=""
+TIMEOUT=60
+EXCLUDE="*.lock,*.min.js,*.min.css,dist/*,build/*,node_modules/*"
+MAX_FILES=20
+AI_REVIEW_ENABLED=true   # Poner en false para solo checks estáticos
+
+if [ -f ".gga" ]; then
+  while IFS='=' read -r key value; do
+    [[ "$key" =~ ^#.*$ ]] && continue
+    [[ -z "$key" ]] && continue
+    key=$(echo "$key" | tr -d ' ')
+    value=$(echo "$value" | tr -d '"' | sed 's/^[[:space:]]*//')
+    case "$key" in
+      PROVIDER)           PROVIDER="$value"           ;;
+      MODEL)              MODEL="$value"               ;;
+      TIMEOUT)            TIMEOUT="$value"             ;;
+      EXCLUDE)            EXCLUDE="$value"             ;;
+      MAX_FILES)          MAX_FILES="$value"           ;;
+      AI_REVIEW_ENABLED)  AI_REVIEW_ENABLED="$value"  ;;
+    esac
+  done < ".gga"
+fi
+
+MEMORY_DB="${USERPROFILE:-$HOME}/.local/enterprise-ai/memory.db"
+
+echo ""
+echo "╔══════════════════════════════════╗"
+echo "║   GGA Pre-commit Review v2       ║"
+echo "╚══════════════════════════════════╝"
+
+# ──────────────────────────────────────────────────────────────────
+# Obtener archivos staged
+# ──────────────────────────────────────────────────────────────────
+STAGED_FILES_RAW=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || echo "")
+
+if [ -z "$STAGED_FILES_RAW" ]; then
+  echo "  (sin archivos modificados — commit vacío permitido)"
+  echo ""
+  exit 0
+fi
+
+mapfile -t STAGED_FILES <<< "$STAGED_FILES_RAW"
+echo "  ${#STAGED_FILES[@]} archivo(s) staged"
+echo ""
+
+# ──────────────────────────────────────────────────────────────────
+# LAYER 1: Secrets hardcodeados (sin IA — rápido y bloqueante)
+# ──────────────────────────────────────────────────────────────────
+echo "▶ Layer 1: Buscando secrets..."
+
+SECRET_PATTERNS=(
+  'sk-[a-zA-Z0-9]{32,}'                        # OpenAI / Anthropic keys
+  'sk-ant-[a-zA-Z0-9\-]{40,}'                  # Anthropic específico
+  'ghp_[a-zA-Z0-9]{36}'                        # GitHub Personal Token
+  'ghs_[a-zA-Z0-9]{36}'                        # GitHub App Token
+  'AKIA[0-9A-Z]{16}'                           # AWS Access Key ID
+  'eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+' # JWT tokens
+  'password\s*[:=]\s*["\x27][^"'\'']{6,}["\x27]'  # Passwords hardcodeados
+  'secret\s*[:=]\s*["\x27][^"'\'']{6,}["\x27]'    # Secrets hardcodeados
+  'api[_-]?key\s*[:=]\s*["\x27][^"'\'']{10,}["\x27]'  # API keys genéricas
+  'token\s*[:=]\s*["\x27][^"'\'']{10,}["\x27]'    # Tokens genéricos
+  'AIza[0-9A-Za-z\-_]{35}'                    # Google API Keys
+  'xox[bpoa]-[0-9]{12}-[0-9]{12}'             # Slack tokens
+)
+
+SECRETS_FOUND=false
+for FILE in "${STAGED_FILES[@]}"; do
+  [ -f "$FILE" ] || continue
+  for PATTERN in "${SECRET_PATTERNS[@]}"; do
+    if git diff --cached "$FILE" 2>/dev/null | grep -qiE "$PATTERN"; then
+      echo "  ✗ BLOCKER: Posible secret en $FILE"
+      echo "    Pattern: $PATTERN"
+      SECRETS_FOUND=true
+    fi
+  done
+done
+
+if [ "$SECRETS_FOUND" = true ]; then
+  echo ""
+  echo "🔴 BLOQUEADO: Secrets detectados."
+  echo "   Usa variables de entorno. Revisa con: git diff --cached"
+  echo ""
+  exit 1
+fi
+
+echo "  ✓ Sin secrets detectados"
+echo ""
+
+# ──────────────────────────────────────────────────────────────────
+# LAYER 2: Linters estáticos (sin IA)
+# ──────────────────────────────────────────────────────────────────
+echo "▶ Layer 2: Linters estáticos..."
+LINT_FAILED=false
+
+for FILE in "${STAGED_FILES[@]}"; do
+  [ -f "$FILE" ] || continue
+
+  # Python: ruff
+  if [[ "$FILE" == *.py ]] && command -v ruff &>/dev/null; then
+    if ! ruff check "$FILE" --quiet 2>/dev/null; then
+      echo "  ✗ ruff: $FILE"
+      LINT_FAILED=true
+    fi
+  fi
+
+  # Shell: shellcheck
+  if [[ "$FILE" == *.sh ]] && command -v shellcheck &>/dev/null; then
+    if ! shellcheck --severity=error "$FILE" 2>/dev/null; then
+      echo "  ✗ shellcheck: $FILE"
+      LINT_FAILED=true
+    fi
+  fi
+done
+
+if [ "$LINT_FAILED" = true ]; then
+  echo ""
+  echo "🔴 BLOQUEADO: Errores de linting."
+  echo "   Python: ruff check --fix <archivo>"
+  echo ""
+  exit 1
+fi
+
+echo "  ✓ Linting OK"
+echo ""
+
+# ──────────────────────────────────────────────────────────────────
+# LAYER 3: AI code review (con cache, timeout, multi-provider)
+# ──────────────────────────────────────────────────────────────────
+if [ "$AI_REVIEW_ENABLED" != "true" ]; then
+  echo "  (AI review desactivado en .gga)"
+  echo ""
+  echo "✅ Pre-commit completado. Commit autorizado."
+  echo ""
+  exit 0
+fi
+
+# Verificar que gga-review.sh existe
+GGA_REVIEW="/c/Users/insyd/enterprise-ai-stack/scripts/gga-review.sh"
+if [ ! -f "$GGA_REVIEW" ]; then
+  echo "  ⚠ gga-review.sh no encontrado — saltando AI review"
+  echo "  ✅ Commit autorizado (solo checks estáticos)"
+  echo ""
+  exit 0
+fi
+
+echo "▶ Layer 3: AI review ($PROVIDER)..."
+
+# Construir flags
+GGA_FLAGS="--staged"
+[ -n "$PROVIDER" ]    && GGA_FLAGS="$GGA_FLAGS --provider $PROVIDER"
+[ -n "$MODEL" ]       && GGA_FLAGS="$GGA_FLAGS --model $MODEL"
+[ -n "$TIMEOUT" ]     && GGA_FLAGS="$GGA_FLAGS --timeout $TIMEOUT"
+
+# Ejecutar review
+# shellcheck disable=SC2086
+if bash "$GGA_REVIEW" $GGA_FLAGS; then
+  echo "✅ Pre-commit completado. Commit autorizado."
+  echo ""
+  exit 0
+else
+  EXIT_CODE=$?
+  echo ""
+  echo "🔴 BLOQUEADO: AI review detectó problemas."
+  echo "   Corrige los issues y vuelve a commitear."
+  echo ""
+  echo "  Para saltear (emergencia):"
+  echo "    git commit --no-verify"
+  echo ""
+  exit $EXIT_CODE
+fi
